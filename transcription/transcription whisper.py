@@ -3,6 +3,7 @@ import threading
 import customtkinter as ctk
 from tkinter import filedialog
 from faster_whisper import WhisperModel
+import torch
 
 # ----------- Paramètres disponibles ----------
 MODELS = {
@@ -65,6 +66,8 @@ class App(ctk.CTk):
         # Paramètres modèle/langue/fichiers
         self.files = []
         self.current_file = 0
+        self.model = None
+        self.loaded_model_name = None
 
         # ---- Interface (frame du haut) ----
         top_frame = ctk.CTkFrame(self)
@@ -116,12 +119,24 @@ class App(ctk.CTk):
             self.btn_lancer.configure(state="disabled")
         self.txt_progress.see("end")
 
+    def load_model(self):
+        model_name = MODELS[self.combo_model.get()]
+        if self.model is not None and self.loaded_model_name == model_name:
+            return
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        compute = "float16" if device == "cuda" else "int8"
+        self.txt_progress.insert("end", f"Chargement du modèle {model_name} sur {device}…\n")
+        self.txt_progress.see("end")
+        self.model = WhisperModel(model_name, device=device, compute_type=compute)
+        self.loaded_model_name = model_name
+
     # ----------- Lancer la transcription par lot -----------
     def lancer_lot(self):
         self.btn_lancer.configure(state="disabled")
         if not self.files:
             self.txt_progress.insert("end", "Aucun fichier sélectionné.\n")
             return
+        self.load_model()
         self.txt_progress.insert("end", "\nDébut du traitement par lot…\n")
         self.progressbar.set(0)
         self.after(100, self.transcrire_prochain)
@@ -141,9 +156,8 @@ class App(ctk.CTk):
     # ----------- Thread de transcription d’un fichier -----------
     def transcribe_thread(self, fichier):
         try:
-            model_name = MODELS[self.combo_model.get()]
             lang_code = LANGS[self.combo_lang.get()]
-            model = WhisperModel(model_name, device="cpu", compute_type="int8")
+            model = self.model
 
             segments, info = model.transcribe(
                 fichier,
